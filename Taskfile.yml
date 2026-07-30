@@ -36,6 +36,11 @@ tasks:
     cmds:
       - migrate -path={{.MIGRATIONS_PATH}} -database "{{.DATABASE_URL}}" -verbose down {{.CLI_ARGS}}
 
+  dev_migrate_down:
+    desc: Rollback migrations down N steps for development
+    cmds:
+      - migrate -path={{.MIGRATIONS_PATH}} -database "{{.DEV_DATABASE_URL}}" -verbose down {{.CLI_ARGS}}
+
   force_migrate_down:
     desc: Force migration version
     cmds:

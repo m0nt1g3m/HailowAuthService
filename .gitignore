@@ -31,3 +31,5 @@ logs/
 .idea/
 .vscode/
 **/.DS_Store
+
+*.rdb

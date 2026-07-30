@@ -29,9 +29,9 @@ func main() {
 		addr = "localhost"
 	}
 
-	portStr := os.Getenv("PORT")
+	portStr := os.Getenv("AUTH_SERVICE_PORT")
 	if portStr == "" {
-		portStr = "8080"
+		portStr = "50001"
 	}
 
 	port, err := strconv.Atoi(portStr)
@@ -41,16 +41,16 @@ func main() {
 
 	grpcServer, err := server.Init(addr, port)
 	if err != nil {
-		logger.Log.Fatalf("failed to initialize server: %v", err)
+		logger.Log.Fatalf("Failed to initialize server: %v", err)
 	}
 
 	listenAddr := fmt.Sprintf("%s:%d", addr, port)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		logger.Log.Fatalf("failed to listen on %s: %v", listenAddr, err)
+		logger.Log.Fatalf("Failed to listen on %s: %v", listenAddr, err)
 	}
 
-	logger.Log.Infof("starting gRPC server on %s", listenAddr)
+	logger.Log.Infof("gRPC server started on %s", listenAddr)
 	if err := grpcServer.Serve(listener); err != nil {
 		logger.Log.Fatalf("gRPC server stopped with error: %v", err)
 	}

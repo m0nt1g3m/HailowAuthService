@@ -1,163 +1,176 @@
 package repository
 
 import (
+	"HailowAuthService/internal/domain"
 	"context"
 	"errors"
-	"sync"
 
-	"HailowAuthService/internal/domain"
-
-	"github.com/jackc/pgconn"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type UserRepository interface {
-	Create(ctx context.Context, user *domain.User) error
-	GetByID(ctx context.Context, id string) (*domain.User, error)
-	GetByEmail(ctx context.Context, email string) (*domain.User, error)
+type UserRepository struct {
+	db *pgxpool.Pool
 }
 
-type InMemoryUserRepository struct {
-	mu sync.RWMutex
-
-	usersByID    map[string]*domain.User
-	usersByEmail map[string]*domain.User
-}
-
-func NewInMemoryUserRepository() UserRepository {
-	return &InMemoryUserRepository{
-		usersByID:    make(map[string]*domain.User),
-		usersByEmail: make(map[string]*domain.User),
+func NewUserRepository(db *pgxpool.Pool) *UserRepository {
+	return &UserRepository{
+		db: db,
 	}
 }
 
-func (r *InMemoryUserRepository) Create(ctx context.Context, user *domain.User) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
+	query := `
+		SELECT *
+		FROM users_schema.users
+		WHERE id = $1
+		LIMIT 1
+	`
 
-	if _, exists := r.usersByEmail[user.Email]; exists {
-		return domain.ErrUserAlreadyExists
-	}
-
-	r.usersByID[user.ID] = user
-	r.usersByEmail[user.Email] = user
-	return nil
-}
-
-func (r *InMemoryUserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	user, exists := r.usersByID[id]
-	if !exists {
-		return nil, nil
-	}
-
-	return user, nil
-}
-
-func (r *InMemoryUserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	user, exists := r.usersByEmail[email]
-	if !exists {
-		return nil, nil
-	}
-
-	return user, nil
-}
-
-type PostgresUserRepository struct {
-	pool *pgxpool.Pool
-}
-
-func NewPostgresUserRepository(pool *pgxpool.Pool) UserRepository {
-	return &PostgresUserRepository{pool: pool}
-}
-
-func (r *PostgresUserRepository) Create(ctx context.Context, user *domain.User) error {
-	query := `INSERT INTO users_schema.users
-		(id, avatar_url, first_name, last_name, email, password_hash, role, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-
-	_, err := r.pool.Exec(ctx, query,
-		user.ID,
-		user.AvatarURL,
-		user.FirstName,
-		user.LastName,
-		user.Email,
-		user.PasswordHash,
-		user.Role.String(),
-		user.CreatedAt,
-		user.UpdatedAt,
-	)
+	rows, err := r.db.Query(ctx, query, id)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return domain.ErrUserAlreadyExists
-		}
-		return err
+		return nil, err
 	}
+	defer rows.Close()
 
-	return nil
-}
-
-func (r *PostgresUserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
-	query := `SELECT id, avatar_url, first_name, last_name, email, password_hash, role, created_at, updated_at
-		FROM users_schema.users
-		WHERE id = $1`
-
-	row := r.pool.QueryRow(ctx, query, id)
-	user := &domain.User{}
-	var role string
-	if err := row.Scan(
-		&user.ID,
-		&user.AvatarURL,
-		&user.FirstName,
-		&user.LastName,
-		&user.Email,
-		&user.PasswordHash,
-		&role,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-	); err != nil {
+	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, domain.ErrUserNotFound
 		}
 		return nil, err
 	}
 
-	user.Role = domain.ParseRole(role)
-	return user, nil
+	return &user, nil
 }
 
-func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	query := `SELECT id, avatar_url, first_name, last_name, email, password_hash, role, created_at, updated_at
+func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+	query := `
+		SELECT *
 		FROM users_schema.users
-		WHERE email = $1`
+		WHERE email = $1
+		LIMIT 1
+	`
 
-	row := r.pool.QueryRow(ctx, query, email)
-	user := &domain.User{}
-	var role string
-	if err := row.Scan(
-		&user.ID,
-		&user.AvatarURL,
-		&user.FirstName,
-		&user.LastName,
-		&user.Email,
-		&user.PasswordHash,
-		&role,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-	); err != nil {
+	rows, err := r.db.Query(ctx, query, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, domain.ErrUserNotFound
 		}
 		return nil, err
 	}
 
-	user.Role = domain.ParseRole(role)
-	return user, nil
+	return &user, nil
+}
+
+func (r *UserRepository) CreateUser(ctx context.Context, input *domain.UserInfo) (*domain.User, error) {
+	query := `
+			INSERT INTO users_schema.users (first_name, last_name, email, password_hash, role)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING *`
+
+	rows, err := r.db.Query(ctx, query, input.FirstName, input.LastName, input.Email, input.Password, input.Role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) UpdateUserInfo(ctx context.Context, input *domain.User) (*domain.User, error) {
+	query := `
+			UPDATE users_schema.users
+			SET email = $1, first_name = $2, last_name = $3
+			WHERE id = $4
+			RETURNING *
+	`
+
+	rows, err := r.db.Query(ctx, query, input.Email, input.FirstName, input.LastName, input.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
+	query := `
+		SELECT *
+		FROM users_schema.users
+		WHERE email = $1 OR first_name = $1 OR last_name = $1
+		LIMIT 1
+	`
+
+	rows, err := r.db.Query(ctx, query, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatar string) (*domain.User, string, error) {
+	query := `
+        WITH old_user AS (
+            SELECT avatar FROM users_schema.users WHERE id = $2
+        )
+        UPDATE users_schema.users
+        SET avatar = $1
+        WHERE id = $2
+        RETURNING *, (SELECT avatar FROM old_user) AS old_avatar
+    `
+
+	rows, err := r.db.Query(ctx, query, avatar, userID)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, "", err
+		}
+		return nil, "", domain.ErrUserNotFound
+	}
+
+	type result struct {
+		domain.User `pgx:",inline"`
+		OldAvatar   *string `db:"old_avatar"`
+	}
+
+	res, err := pgx.RowToStructByName[result](rows)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var oldAvatarStr string
+	if res.OldAvatar != nil {
+		oldAvatarStr = *res.OldAvatar
+	}
+
+	return &res.User, oldAvatarStr, nil
 }

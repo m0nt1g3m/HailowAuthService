@@ -1,15 +1,62 @@
 package domain
 
-import "time"
+import (
+	"database/sql/driver"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Role string
+
+const (
+	RoleUnspecified Role = "ROLE_UNSPECIFIED"
+	RoleCustomer    Role = "ROLE_CUSTOMER"
+	RoleSeller      Role = "ROLE_SELLER"
+	RoleModerator   Role = "ROLE_MODERATOR"
+)
+
+func (r *Role) Scan(value any) error {
+	if value == nil {
+		*r = RoleUnspecified
+		return nil
+	}
+	switch v := value.(type) {
+	case string:
+		*r = Role(v)
+	case []byte:
+		*r = Role(v)
+	default:
+		return fmt.Errorf("cannot scan %T into domain.Role", value)
+	}
+	return nil
+}
+
+func (r Role) Value() (driver.Value, error) {
+	return string(r), nil
+}
+
+type Claims struct {
+	ID        uuid.UUID
+	Username  string
+	ExpiresAt time.Time
+}
 
 type TokenPair struct {
 	AccessToken  string
 	RefreshToken string
 }
 
-type Session struct {
-	ID        string
-	UserID    string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+type RefreshSession struct {
+	ID           string
+	UserID       uuid.UUID
+	RefreshToken string
+	Fingerprint  string
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+}
+
+func (s *RefreshSession) IsExpired() bool {
+	return time.Now().After(s.ExpiresAt)
 }

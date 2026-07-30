@@ -5,10 +5,10 @@ import (
 
 	pb "HailowAuthService/HailowProto/build/go/AuthService/v1"
 	"HailowAuthService/internal/domain"
+	"HailowAuthService/internal/transport/grpc/response/errorcode"
 	"HailowAuthService/internal/usecase/auth"
+	"HailowAuthService/pkg/logger"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -21,70 +21,92 @@ func NewAuthHandler(usecase auth.Usecase) *AuthHandler {
 	return &AuthHandler{usecase: usecase}
 }
 
-func (h *AuthHandler) SignUp(ctx context.Context, req *pb.SignUpRequest) (*pb.SignUpResponse, error) {
-	user, _, err := h.usecase.SignUp(ctx, req.Email, req.Password)
+func (h *AuthHandler) ModeratorSignUp(ctx context.Context, req *pb.ModeratorSignUpRequest) (*pb.ModeratorSignUpResponse, error) {
+	input := domain.UserInfo{
+		FirstName: req.GetFirstName(),
+		LastName:  req.GetLastName(),
+		Email:     req.GetEmail(),
+		Password:  req.GetPassword(),
+		Role:      domain.RoleModerator,
+	}
+	user, err := h.usecase.SignUp(ctx, &input)
 	if err != nil {
-		return nil, toStatus(err)
+		return nil, errorcode.ToStatus(err)
 	}
 
-	return &pb.SignUpResponse{User: mapUser(user)}, nil
+	return &pb.ModeratorSignUpResponse{User: mapUser(user)}, nil
+}
+
+func (h *AuthHandler) SellerSignUp(ctx context.Context, req *pb.SellerSignUpRequest) (*pb.SellerSignUpResponse, error) {
+	input := domain.UserInfo{
+		FirstName: req.GetFirstName(),
+		LastName:  req.GetLastName(),
+		Email:     req.GetEmail(),
+		Password:  req.GetPassword(),
+		Role:      domain.RoleSeller,
+	}
+	user, err := h.usecase.SignUp(ctx, &input)
+	if err != nil {
+		return nil, errorcode.ToStatus(err)
+	}
+
+	return &pb.SellerSignUpResponse{User: mapUser(user)}, nil
+}
+
+func (h *AuthHandler) CustomerSignUp(ctx context.Context, req *pb.CustomerSignUpRequest) (*pb.CustomerSignUpResponse, error) {
+	logger.Log.Infof("CustomerSignUp called with FirstName: %s, LastName: %s, Email: %s", req.GetFirstName(), req.GetLastName(), req.GetEmail())
+	input := &domain.UserInfo{
+		FirstName: req.GetFirstName(),
+		LastName:  req.GetLastName(),
+		Email:     req.GetEmail(),
+		Password:  req.GetPassword(),
+		Role:      domain.RoleCustomer,
+	}
+	user, err := h.usecase.SignUp(ctx, input)
+	if err != nil {
+		return nil, errorcode.ToStatus(err)
+	}
+
+	return &pb.CustomerSignUpResponse{User: mapUser(user)}, nil
 }
 
 func (h *AuthHandler) SignIn(ctx context.Context, req *pb.SignInRequest) (*pb.SignInResponse, error) {
-	user, tokens, err := h.usecase.SignIn(ctx, req.Email, req.Password)
+	input := &domain.UserInfo{
+		Email:    req.GetEmail(),
+		Password: req.GetPassword(),
+	}
+	tokens, err := h.usecase.SignIn(ctx, input)
 	if err != nil {
-		return nil, toStatus(err)
+		return nil, errorcode.ToStatus(err)
 	}
 
-	return &pb.SignInResponse{User: mapUser(user), Tokens: mapTokenPair(tokens)}, nil
+	return &pb.SignInResponse{Tokens: mapTokenPair(tokens)}, nil
 }
 
 func (h *AuthHandler) RefreshTokens(ctx context.Context, req *pb.RefreshTokensRequest) (*pb.RefreshTokensResponse, error) {
 	tokens, err := h.usecase.RefreshTokens(ctx, req.RefreshToken)
 	if err != nil {
-		return nil, toStatus(err)
+		return nil, errorcode.ToStatus(err)
 	}
 
-	return &pb.RefreshTokensResponse{Tokens: mapTokenPair(tokens)}, nil
+	return &pb.RefreshTokensResponse{AccessToken: tokens.AccessToken}, nil
 }
 
 func (h *AuthHandler) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.LogoutResponse, error) {
 	if err := h.usecase.Logout(ctx, req.RefreshToken); err != nil {
-		return nil, toStatus(err)
+		return nil, errorcode.ToStatus(err)
 	}
 
 	return &pb.LogoutResponse{Success: true}, nil
 }
 
 func (h *AuthHandler) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error) {
-	user, err := h.usecase.ValidateToken(ctx, req.AccessToken)
+	err := h.usecase.ValidateToken(ctx, req.AccessToken)
 	if err != nil {
-		return nil, toStatus(err)
+		return nil, errorcode.ToStatus(err)
 	}
 
-	return &pb.ValidateTokenResponse{IsValid: true, User: mapUser(user)}, nil
-}
-
-func (h *AuthHandler) GetUserSessions(ctx context.Context, req *pb.GetUserSessionsRequest) (*pb.GetUserSessionsResponse, error) {
-	sessions, err := h.usecase.GetUserSessions(ctx, req.UserId)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-
-	result := make([]*pb.Session, 0, len(sessions))
-	for _, session := range sessions {
-		result = append(result, mapSession(session))
-	}
-
-	return &pb.GetUserSessionsResponse{Sessions: result}, nil
-}
-
-func (h *AuthHandler) RevokeSession(ctx context.Context, req *pb.RevokeSessionRequest) (*pb.RevokeSessionResponse, error) {
-	if err := h.usecase.RevokeSession(ctx, req.UserId, req.SessionId); err != nil {
-		return nil, toStatus(err)
-	}
-
-	return &pb.RevokeSessionResponse{Success: true}, nil
+	return &pb.ValidateTokenResponse{IsValid: true}, nil
 }
 
 func mapUser(user *domain.User) *pb.User {
@@ -94,7 +116,7 @@ func mapUser(user *domain.User) *pb.User {
 
 	return &pb.User{
 		Id:        user.ID,
-		AvatarUrl: user.AvatarURL,
+		Avatar:    user.Avatar,
 		FirstName: user.FirstName,
 		LastName:  user.LastName,
 		Email:     user.Email,
@@ -111,42 +133,15 @@ func mapTokenPair(tokens *domain.TokenPair) *pb.TokenPair {
 	return &pb.TokenPair{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken}
 }
 
-func mapSession(session *domain.Session) *pb.Session {
-	if session == nil {
-		return nil
-	}
-	return &pb.Session{
-		Id:        session.ID,
-		UserId:    session.UserID,
-		CreatedAt: timestamppb.New(session.CreatedAt),
-		ExpiresAt: timestamppb.New(session.ExpiresAt),
-	}
-}
-
 func mapRole(role domain.Role) pb.Role {
 	switch role {
 	case domain.RoleCustomer:
 		return pb.Role_ROLE_CUSTOMER
 	case domain.RoleSeller:
 		return pb.Role_ROLE_SELLER
-	case domain.RoleAdmin:
-		return pb.Role_ROLE_ADMIN
+	case domain.RoleModerator:
+		return pb.Role_ROLE_MODERATOR
 	default:
 		return pb.Role_ROLE_UNSPECIFIED
-	}
-}
-
-func toStatus(err error) error {
-	switch err {
-	case domain.ErrUserAlreadyExists:
-		return status.Error(codes.AlreadyExists, err.Error())
-	case domain.ErrInvalidCredentials, domain.ErrUnauthorized:
-		return status.Error(codes.Unauthenticated, err.Error())
-	case domain.ErrTokenNotFound:
-		return status.Error(codes.NotFound, err.Error())
-	case domain.ErrSessionNotFound:
-		return status.Error(codes.NotFound, err.Error())
-	default:
-		return status.Error(codes.Internal, err.Error())
 	}
 }
