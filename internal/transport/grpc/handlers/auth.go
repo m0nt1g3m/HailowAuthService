@@ -2,13 +2,14 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	pb "HailowAuthService/HailowProto/build/go/AuthService/v1"
 	"HailowAuthService/internal/domain"
 	"HailowAuthService/internal/transport/grpc/response/errorcode"
 	"HailowAuthService/internal/usecase/auth"
-	"HailowAuthService/pkg/logger"
 
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -21,46 +22,37 @@ func NewAuthHandler(usecase auth.Usecase) *AuthHandler {
 	return &AuthHandler{usecase: usecase}
 }
 
-func (h *AuthHandler) ModeratorSignUp(ctx context.Context, req *pb.ModeratorSignUpRequest) (*pb.ModeratorSignUpResponse, error) {
+func (h *AuthHandler) AdminSignUp(ctx context.Context, req *pb.AdminSignUpRequest) (*pb.AdminSignUpResponse, error) {
 	input := domain.UserInfo{
-		FirstName: req.GetFirstName(),
-		LastName:  req.GetLastName(),
-		Email:     req.GetEmail(),
-		Password:  req.GetPassword(),
-		Role:      domain.RoleModerator,
+		FirstName:   req.GetFirstName(),
+		LastName:    req.GetLastName(),
+		Email:       req.GetEmail(),
+		PhoneNumber: req.GetPhoneNumber(),
+		City:        req.GetCity(),
+		Street:      req.GetStreet(),
+		Building:    req.GetBuilding(),
+		Password:    req.GetPassword(),
+		Role:        domain.RoleAdmin,
 	}
 	user, err := h.usecase.SignUp(ctx, &input)
 	if err != nil {
 		return nil, errorcode.ToStatus(err)
 	}
 
-	return &pb.ModeratorSignUpResponse{User: mapUser(user)}, nil
-}
-
-func (h *AuthHandler) SellerSignUp(ctx context.Context, req *pb.SellerSignUpRequest) (*pb.SellerSignUpResponse, error) {
-	input := domain.UserInfo{
-		FirstName: req.GetFirstName(),
-		LastName:  req.GetLastName(),
-		Email:     req.GetEmail(),
-		Password:  req.GetPassword(),
-		Role:      domain.RoleSeller,
-	}
-	user, err := h.usecase.SignUp(ctx, &input)
-	if err != nil {
-		return nil, errorcode.ToStatus(err)
-	}
-
-	return &pb.SellerSignUpResponse{User: mapUser(user)}, nil
+	return &pb.AdminSignUpResponse{User: mapUser(user)}, nil
 }
 
 func (h *AuthHandler) CustomerSignUp(ctx context.Context, req *pb.CustomerSignUpRequest) (*pb.CustomerSignUpResponse, error) {
-	logger.Log.Infof("CustomerSignUp called with FirstName: %s, LastName: %s, Email: %s", req.GetFirstName(), req.GetLastName(), req.GetEmail())
 	input := &domain.UserInfo{
-		FirstName: req.GetFirstName(),
-		LastName:  req.GetLastName(),
-		Email:     req.GetEmail(),
-		Password:  req.GetPassword(),
-		Role:      domain.RoleCustomer,
+		FirstName:   req.GetFirstName(),
+		LastName:    req.GetLastName(),
+		Email:       req.GetEmail(),
+		PhoneNumber: req.GetPhoneNumber(),
+		City:        req.GetCity(),
+		Street:      req.GetStreet(),
+		Building:    req.GetBuilding(),
+		Password:    req.GetPassword(),
+		Role:        domain.RoleCustomer,
 	}
 	user, err := h.usecase.SignUp(ctx, input)
 	if err != nil {
@@ -81,6 +73,27 @@ func (h *AuthHandler) SignIn(ctx context.Context, req *pb.SignInRequest) (*pb.Si
 	}
 
 	return &pb.SignInResponse{Tokens: mapTokenPair(tokens)}, nil
+}
+
+func (h *AuthHandler) UploadAvatar(ctx context.Context, req *pb.UploadAvatarRequest) (*pb.UploadAvatarResponse, error) {
+	accessToken := ""
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		values := md.Get("authorization")
+		if len(values) > 0 {
+			accessToken = strings.TrimPrefix(values[0], "Bearer ")
+		}
+	}
+
+	user, err := h.usecase.UploadAvatar(ctx, accessToken, req.GetUserId(), req.GetAvatarImage(), "")
+	if err != nil {
+		return nil, errorcode.ToStatus(err)
+	}
+
+	if user == nil || user.AvatarURL == nil {
+		return &pb.UploadAvatarResponse{}, nil
+	}
+
+	return &pb.UploadAvatarResponse{AvatarUrl: *user.AvatarURL}, nil
 }
 
 func (h *AuthHandler) RefreshTokens(ctx context.Context, req *pb.RefreshTokensRequest) (*pb.RefreshTokensResponse, error) {
@@ -115,14 +128,21 @@ func mapUser(user *domain.User) *pb.User {
 	}
 
 	return &pb.User{
-		Id:        user.ID,
-		Avatar:    user.Avatar,
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		Email:     user.Email,
-		Role:      mapRole(user.Role),
-		CreatedAt: timestamppb.New(user.CreatedAt),
-		UpdatedAt: timestamppb.New(user.UpdatedAt),
+		Id:          user.ID,
+		AvatarUrl:   user.AvatarURL,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
+		Email:       user.Email,
+		PhoneNumber: user.PhoneNumber,
+		City:        user.City,
+		Street:      user.Street,
+		Building:    user.Building,
+		Flat:        user.Flat,
+		Porch:       user.Porch,
+		Floor:       user.Floor,
+		Role:        mapRole(user.Role),
+		CreatedAt:   timestamppb.New(user.CreatedAt),
+		UpdatedAt:   timestamppb.New(user.UpdatedAt),
 	}
 }
 
@@ -137,10 +157,8 @@ func mapRole(role domain.Role) pb.Role {
 	switch role {
 	case domain.RoleCustomer:
 		return pb.Role_ROLE_CUSTOMER
-	case domain.RoleSeller:
-		return pb.Role_ROLE_SELLER
-	case domain.RoleModerator:
-		return pb.Role_ROLE_MODERATOR
+	case domain.RoleAdmin:
+		return pb.Role_ROLE_ADMIN
 	default:
 		return pb.Role_ROLE_UNSPECIFIED
 	}

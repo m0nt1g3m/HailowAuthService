@@ -13,8 +13,7 @@ type Role string
 const (
 	RoleUnspecified Role = "ROLE_UNSPECIFIED"
 	RoleCustomer    Role = "ROLE_CUSTOMER"
-	RoleSeller      Role = "ROLE_SELLER"
-	RoleModerator   Role = "ROLE_MODERATOR"
+	RoleAdmin       Role = "ROLE_ADMIN"
 )
 
 func (r *Role) Scan(value any) error {

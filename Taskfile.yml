@@ -44,7 +44,13 @@ tasks:
   force_migrate_down:
     desc: Force migration version
     cmds:
-      - migrate -path={{.MIGRATIONS_PATH}} -database "{{.DATABASE_URL}}" force {{.CLI_ARGS}}
+      - migrate -path={{.MIGRATIONS_PATH}} -database "{{.DATABASE_URL}}" force 1
+  
+  dev_force_migrate_down:
+    desc: Force migration version for development
+    cmds:
+      - migrate -path={{.MIGRATIONS_PATH}} -database "{{.DEV_DATABASE_URL}}" force 1
+
   build_proto:
     desc: Build proto files for Go.
     cmds:

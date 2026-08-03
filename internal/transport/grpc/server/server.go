@@ -1,6 +1,10 @@
 package server
 
 import (
+	"context"
+	"os"
+	"strings"
+
 	pb "HailowAuthService/HailowProto/build/go/AuthService/v1"
 	redis_repository "HailowAuthService/internal/infrastructure/redis/repository"
 	"HailowAuthService/internal/repository"
@@ -10,8 +14,7 @@ import (
 	"HailowAuthService/pkg/database"
 	"HailowAuthService/pkg/logger"
 	cache "HailowAuthService/pkg/redis"
-	"os"
-	"strings"
+	s3storage "HailowAuthService/pkg/s3"
 
 	"google.golang.org/grpc"
 )
@@ -49,7 +52,22 @@ func Init(addr string, port int) (*grpc.Server, error) {
 
 	sessionRepo := redis_repository.NewSessionRepository(redisClient)
 
-	authUsecase := auth.NewAuthUsecase(userRepo, sessionRepo)
+	var s3Client *s3storage.S3Client
+	if accessKeyID := os.Getenv("S3_ACCESS_KEY_ID"); accessKeyID != "" || os.Getenv("S3_SECRET_ACCESS_KEY") != "" || os.Getenv("S3_BUCKET") != "" {
+		cfg := s3storage.Config{
+			AccessKeyID:     os.Getenv("S3_ACCESS_KEY_ID"),
+			SecretAccessKey: os.Getenv("S3_SECRET_ACCESS_KEY"),
+			Region:          os.Getenv("S3_REGION"),
+			Bucket:          os.Getenv("S3_BUCKET"),
+			Endpoint:        os.Getenv("S3_ENDPOINT"),
+		}
+		s3Client, err = s3storage.NewS3Client(context.Background(), cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	authUsecase := auth.NewAuthUsecase(userRepo, sessionRepo, s3Client)
 	authHandler := handlers.NewAuthHandler(authUsecase)
 
 	grpcServer := grpc.NewServer(

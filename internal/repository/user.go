@@ -72,11 +72,11 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 
 func (r *UserRepository) CreateUser(ctx context.Context, input *domain.UserInfo) (*domain.User, error) {
 	query := `
-			INSERT INTO users_schema.users (first_name, last_name, email, password_hash, role)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO users_schema.users (first_name, last_name, email, phone_number, city, street, building, password_hash, role)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING *`
 
-	rows, err := r.db.Query(ctx, query, input.FirstName, input.LastName, input.Email, input.Password, input.Role)
+	rows, err := r.db.Query(ctx, query, input.FirstName, input.LastName, input.Email, input.PhoneNumber, input.City, input.Street, input.Building, input.Password, input.Role)
 	if err != nil {
 		return nil, err
 	}
@@ -133,18 +133,18 @@ func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*d
 	return &user, nil
 }
 
-func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatar string) (*domain.User, string, error) {
+func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL string) (*domain.User, string, error) {
 	query := `
         WITH old_user AS (
-            SELECT avatar FROM users_schema.users WHERE id = $2
+            SELECT avatar_url FROM users_schema.users WHERE id = $2
         )
         UPDATE users_schema.users
-        SET avatar = $1
+        SET avatar_url = $1
         WHERE id = $2
-        RETURNING *, (SELECT avatar FROM old_user) AS old_avatar
+        RETURNING *, (SELECT avatar_url FROM old_user) AS old_avatar_url
     `
 
-	rows, err := r.db.Query(ctx, query, avatar, userID)
+	rows, err := r.db.Query(ctx, query, avatarURL, userID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -158,8 +158,8 @@ func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 	}
 
 	type result struct {
-		domain.User `pgx:",inline"`
-		OldAvatar   *string `db:"old_avatar"`
+		domain.User  `pgx:",inline"`
+		OldAvatarURL *string `db:"old_avatar_url"`
 	}
 
 	res, err := pgx.RowToStructByName[result](rows)
@@ -168,8 +168,8 @@ func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 	}
 
 	var oldAvatarStr string
-	if res.OldAvatar != nil {
-		oldAvatarStr = *res.OldAvatar
+	if res.OldAvatarURL != nil {
+		oldAvatarStr = *res.OldAvatarURL
 	}
 
 	return &res.User, oldAvatarStr, nil

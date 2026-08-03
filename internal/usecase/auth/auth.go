@@ -1,14 +1,18 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"time"
 
 	"HailowAuthService/internal/domain"
 	redis_repository "HailowAuthService/internal/infrastructure/redis/repository"
 	"HailowAuthService/internal/repository"
+	s3storage "HailowAuthService/pkg/s3"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -18,6 +22,7 @@ import (
 type AuthUseCase struct {
 	repo       *redis_repository.SessionRepository
 	userRepo   *repository.UserRepository
+	s3Client   *s3storage.S3Client
 	jwtSecret  []byte
 	accessTTL  time.Duration
 	refreshTTL time.Duration
@@ -29,6 +34,8 @@ type Usecase interface {
 	RefreshTokens(ctx context.Context, refreshToken string) (*domain.TokenPair, error)
 	ValidateToken(ctx context.Context, accessToken string) error
 	Logout(ctx context.Context, refreshToken string) error
+	UploadAvatar(ctx context.Context, accessToken string, userID string, avatarImage []byte, contentType string) (*domain.User, error)
+	UpdateUserInfo(ctx context.Context, input *domain.User) (*domain.User, error)
 }
 
 type jwtClaims struct {
@@ -41,10 +48,11 @@ type jwtClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthUsecase(userRepo *repository.UserRepository, repo *redis_repository.SessionRepository) *AuthUseCase {
+func NewAuthUsecase(userRepo *repository.UserRepository, repo *redis_repository.SessionRepository, s3Client *s3storage.S3Client) *AuthUseCase {
 	return &AuthUseCase{
 		repo:     repo,
 		userRepo: userRepo,
+		s3Client: s3Client,
 	}
 }
 
@@ -261,4 +269,101 @@ func (u *AuthUseCase) parseAccessToken(tokenStr string) (*jwtClaims, error) {
 	}
 
 	return &claims, nil
+}
+
+func (u *AuthUseCase) UploadAvatar(ctx context.Context, accessToken string, userID string, avatarImage []byte, contentType string) (*domain.User, error) {
+	if accessToken == "" {
+		return nil, domain.ErrUnauthorized
+	}
+	if userID == "" {
+		return nil, domain.ErrUserNotFound
+	}
+	if len(avatarImage) == 0 {
+		return nil, domain.ErrAvatarImageEmpty
+	}
+	if u.s3Client == nil {
+		return nil, domain.ErrAvatarUploadUnavailable
+	}
+	if contentType == "" {
+		contentType = http.DetectContentType(avatarImage)
+	}
+
+	if err := u.ValidateToken(ctx, accessToken); err != nil {
+		return nil, err
+	}
+
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id: %w", err)
+	}
+
+	currentUser, err := u.userRepo.GetByID(ctx, parsedUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	avatarURL, err := u.s3Client.Upload(ctx, "avatars", fmt.Sprintf("%s/%s%s", userID, uuid.NewString(), extensionForContentType(contentType)), bytes.NewReader(avatarImage), contentType)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", domain.ErrAvatarUploadFailed, err)
+	}
+
+	user, oldAvatarURL, err := u.userRepo.UpdateAvatar(ctx, parsedUserID, avatarURL)
+	if err != nil {
+		_ = u.s3Client.Delete(ctx, avatarURL)
+		return nil, err
+	}
+
+	if currentUser.AvatarURL != nil && *currentUser.AvatarURL != "" && *currentUser.AvatarURL != avatarURL {
+		_ = u.s3Client.Delete(ctx, *currentUser.AvatarURL)
+	}
+	if oldAvatarURL != "" && oldAvatarURL != avatarURL {
+		_ = u.s3Client.Delete(ctx, oldAvatarURL)
+	}
+
+	return user, nil
+}
+
+func (u *AuthUseCase) UploadAvatarLegacy(ctx context.Context, userID string, avatarURL string) (*domain.User, error) {
+	if userID == "" {
+		return nil, domain.ErrUserNotFound
+	}
+	if avatarURL == "" {
+		return nil, domain.ErrAvatarImageEmpty
+	}
+
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id: %w", err)
+	}
+
+	user, _, err := u.userRepo.UpdateAvatar(ctx, parsedUserID, avatarURL)
+	return user, err
+}
+
+func (u *AuthUseCase) UpdateUserInfo(ctx context.Context, input *domain.User) (*domain.User, error) {
+	if input == nil || input.ID == "" {
+		return nil, domain.ErrUserNotFound
+	}
+
+	updated, err := u.userRepo.UpdateUserInfo(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	return updated, nil
+}
+
+func extensionForContentType(contentType string) string {
+	switch contentType {
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".bin"
+	}
 }
