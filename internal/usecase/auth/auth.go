@@ -33,9 +33,14 @@ type Usecase interface {
 	SignIn(ctx context.Context, input *domain.UserInfo) (*domain.TokenPair, error)
 	RefreshTokens(ctx context.Context, refreshToken string) (*domain.TokenPair, error)
 	ValidateToken(ctx context.Context, accessToken string) error
+	ValidateTokenForUser(ctx context.Context, accessToken string, userID string) error
 	Logout(ctx context.Context, refreshToken string) error
 	UploadAvatar(ctx context.Context, accessToken string, userID string, avatarImage []byte, contentType string) (*domain.User, error)
-	UpdateUserInfo(ctx context.Context, input *domain.User) (*domain.User, error)
+	UpdateProfile(ctx context.Context, input *domain.User) (*domain.User, error)
+	UpdateDeliveryInfo(ctx context.Context, input *domain.User) (*domain.User, error)
+	GetProfile(ctx context.Context, userID string) (*domain.User, error)
+	ResetPassword(ctx context.Context, userID string, newPassword string) error
+	DeleteAccount(ctx context.Context, accessToken string, userID string) error
 }
 
 type jwtClaims struct {
@@ -138,6 +143,29 @@ func (u *AuthUseCase) ValidateToken(ctx context.Context, accessToken string) err
 	_, err = u.userRepo.GetByEmail(ctx, claims.Email)
 	if err != nil {
 		return domain.ErrUserNotFound
+	}
+
+	return nil
+}
+
+func (u *AuthUseCase) ValidateTokenForUser(ctx context.Context, accessToken string, userID string) error {
+	claims, err := u.parseAccessToken(accessToken)
+	if err != nil {
+		return domain.ErrUnauthorized
+	}
+
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("Invalid user id: %w", err)
+	}
+
+	if claims.ID != parsedUserID {
+		return domain.ErrUnauthorized
+	}
+
+	_, err = u.userRepo.GetByID(ctx, parsedUserID)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -294,7 +322,7 @@ func (u *AuthUseCase) UploadAvatar(ctx context.Context, accessToken string, user
 
 	parsedUserID, err := uuid.Parse(userID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid user id: %w", err)
+		return nil, fmt.Errorf("Invalid user id: %w", err)
 	}
 
 	currentUser, err := u.userRepo.GetByID(ctx, parsedUserID)
@@ -323,34 +351,105 @@ func (u *AuthUseCase) UploadAvatar(ctx context.Context, accessToken string, user
 	return user, nil
 }
 
-func (u *AuthUseCase) UploadAvatarLegacy(ctx context.Context, userID string, avatarURL string) (*domain.User, error) {
-	if userID == "" {
-		return nil, domain.ErrUserNotFound
-	}
-	if avatarURL == "" {
-		return nil, domain.ErrAvatarImageEmpty
-	}
-
-	parsedUserID, err := uuid.Parse(userID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid user id: %w", err)
-	}
-
-	user, _, err := u.userRepo.UpdateAvatar(ctx, parsedUserID, avatarURL)
-	return user, err
-}
-
-func (u *AuthUseCase) UpdateUserInfo(ctx context.Context, input *domain.User) (*domain.User, error) {
+func (u *AuthUseCase) UpdateProfile(ctx context.Context, input *domain.User) (*domain.User, error) {
 	if input == nil || input.ID == "" {
 		return nil, domain.ErrUserNotFound
 	}
 
-	updated, err := u.userRepo.UpdateUserInfo(ctx, input)
+	user, err := u.userRepo.UpdateProfile(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 
-	return updated, nil
+	return user, nil
+}
+
+func (u *AuthUseCase) UpdateDeliveryInfo(ctx context.Context, input *domain.User) (*domain.User, error) {
+	if input == nil || input.ID == "" {
+		return nil, domain.ErrUserNotFound
+	}
+
+	user, err := u.userRepo.UpdateDeliveryInfo(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
+func (u *AuthUseCase) GetProfile(ctx context.Context, userID string) (*domain.User, error) {
+	if userID == "" {
+		return nil, domain.ErrUserNotFound
+	}
+
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("Invalid user id: %w", err)
+	}
+
+	user, err := u.userRepo.GetByID(ctx, parsedUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
+func (u *AuthUseCase) ResetPassword(ctx context.Context, userID string, newPassword string) error {
+	if userID == "" {
+		return domain.ErrUserNotFound
+	}
+	if newPassword == "" {
+		return domain.ErrInvalidCredentials
+	}
+
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("Invalid user id: %w", err)
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	_, err = u.userRepo.UpdatePassword(ctx, parsedUserID, string(hashedPassword))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (u *AuthUseCase) DeleteAccount(ctx context.Context, accessToken string, userID string) error {
+	if accessToken == "" {
+		return domain.ErrUnauthorized
+	}
+	if userID == "" {
+		return domain.ErrUserNotFound
+	}
+
+	if err := u.ValidateTokenForUser(ctx, accessToken, userID); err != nil {
+		return err
+	}
+
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("Invalid user id: %w", err)
+	}
+
+	user, err := u.userRepo.GetByID(ctx, parsedUserID)
+	if err != nil {
+		return err
+	}
+
+	if user.AvatarURL != nil && *user.AvatarURL != "" {
+		if u.s3Client != nil {
+			_ = u.s3Client.Delete(ctx, *user.AvatarURL)
+		}
+	}
+
+	return u.userRepo.DeleteUser(ctx, parsedUserID)
 }
 
 func extensionForContentType(contentType string) string {

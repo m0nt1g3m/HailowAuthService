@@ -89,7 +89,7 @@ func (s *S3Client) Delete(ctx context.Context, fileURL string) error {
 
 	objectKey := extractObjectKey(fileURL, s.bucket)
 	if objectKey == "" {
-		return fmt.Errorf("unable to extract object key from url: %s", fileURL)
+		return fmt.Errorf("Unable to extract object key from URL: %s", fileURL)
 	}
 
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{

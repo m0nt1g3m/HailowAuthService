@@ -2,8 +2,13 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
+	"os/signal"
+	"runtime"
 	"strings"
+	"syscall"
 
 	pb "HailowAuthService/HailowProto/build/go/AuthService/v1"
 	redis_repository "HailowAuthService/internal/infrastructure/redis/repository"
@@ -16,13 +21,27 @@ import (
 	cache "HailowAuthService/pkg/redis"
 	s3storage "HailowAuthService/pkg/s3"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
 
-func Init(addr string, port int) (*grpc.Server, error) {
-	debug := os.Getenv("DEBUG")
-	logger.Log.Infof("initialize gRPC server on %s:%d", addr, port)
+type Server struct {
+	grpcServer  *grpc.Server
+	addr        string
+	port        int
+	listener    net.Listener
+	dbPool      *pgxpool.Pool
+	redisClient *redis.Client
+	s3Client    *s3storage.S3Client
+}
 
+func Init(addr string, port int) (*Server, error) {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+	logger.InitLogger("development")
+	logger.Log.Infof("Initializing gRPC server on %s:%d", addr, port)
+
+	debug := os.Getenv("DEBUG")
 	var dbURL string
 	var redisAddr string
 
@@ -47,7 +66,7 @@ func Init(addr string, port int) (*grpc.Server, error) {
 
 	redisClient, err := cache.NewRedisClient(redisAddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
 	sessionRepo := redis_repository.NewSessionRepository(redisClient)
@@ -63,7 +82,7 @@ func Init(addr string, port int) (*grpc.Server, error) {
 		}
 		s3Client, err = s3storage.NewS3Client(context.Background(), cfg)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to initialize S3 client: %w", err)
 		}
 	}
 
@@ -78,5 +97,53 @@ func Init(addr string, port int) (*grpc.Server, error) {
 	)
 
 	pb.RegisterAuthServiceServer(grpcServer, authHandler)
-	return grpcServer, nil
+
+	return &Server{
+		grpcServer:  grpcServer,
+		addr:        addr,
+		port:        port,
+		dbPool:      pool,
+		redisClient: redisClient,
+		s3Client:    s3Client,
+	}, nil
+}
+
+func (s *Server) Run() error {
+	listenAddr := fmt.Sprintf("%s:%d", s.addr, s.port)
+	ln, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	s.listener = ln
+
+	logger.Log.Infof("gRPC server listening on %s", ln.Addr().String())
+
+	go func() {
+		if err := s.grpcServer.Serve(ln); err != nil && err != grpc.ErrServerStopped {
+			logger.Log.Errorf("gRPC server error: %v", err)
+		}
+	}()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	logger.Log.Info("Shutdown signal received")
+
+	s.grpcServer.GracefulStop()
+
+	if s.dbPool != nil {
+		s.dbPool.Close()
+		logger.Log.Info("PostgreSQL pool closed")
+	}
+
+	if s.redisClient != nil {
+		if err := s.redisClient.Close(); err != nil {
+			logger.Log.Errorf("Error closing Redis: %v", err)
+		} else {
+			logger.Log.Info("Redis client closed")
+		}
+	}
+
+	logger.Log.Info("Resources closed, gRPC server stopped")
+	return nil
 }

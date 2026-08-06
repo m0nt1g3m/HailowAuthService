@@ -13,9 +13,9 @@ CREATE TABLE IF NOT EXISTS users_schema.users (
     password_hash VARCHAR(255) NOT NULL,
     role users_schema.user_role NOT NULL,
     phone_number VARCHAR(20) UNIQUE NOT NULL,
-    city VARCHAR(100) NOT NULL,
-    street VARCHAR(100) NOT NULL,
-    building VARCHAR(10) NOT NULL,
+    city VARCHAR(100) NOT NULL DEFAULT 'Москва',
+    street VARCHAR(100) NOT NULL DEFAULT 'Арбат',
+    building VARCHAR(10) NOT NULL DEFAULT '44с1',
     porch INTEGER,
     floor INTEGER,
     flat INTEGER,
@@ -25,3 +25,5 @@ CREATE TABLE IF NOT EXISTS users_schema.users (
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users_schema.users(email);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users_schema.users(role);
+
+ALTER DATABASE "Hailow" SET TIMEZONE TO 'Europe/Moscow';

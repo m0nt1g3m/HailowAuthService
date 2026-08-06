@@ -90,15 +90,15 @@ func (r *UserRepository) CreateUser(ctx context.Context, input *domain.UserInfo)
 	return &user, nil
 }
 
-func (r *UserRepository) UpdateUserInfo(ctx context.Context, input *domain.User) (*domain.User, error) {
+func (r *UserRepository) UpdateProfile(ctx context.Context, input *domain.User) (*domain.User, error) {
 	query := `
 			UPDATE users_schema.users
-			SET email = $1, first_name = $2, last_name = $3
-			WHERE id = $4
+			SET email = $1, first_name = $2, last_name = $3, phone_number = $4, updated_at = CURRENT_TIMESTAMP
+			WHERE id = $5
 			RETURNING *
 	`
 
-	rows, err := r.db.Query(ctx, query, input.Email, input.FirstName, input.LastName, input.ID)
+	rows, err := r.db.Query(ctx, query, input.Email, input.FirstName, input.LastName, input.PhoneNumber, input.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
             SELECT avatar_url FROM users_schema.users WHERE id = $2
         )
         UPDATE users_schema.users
-        SET avatar_url = $1
+        SET avatar_url = $1, updated_at = CURRENT_TIMESTAMP
         WHERE id = $2
         RETURNING *, (SELECT avatar_url FROM old_user) AS old_avatar_url
     `
@@ -173,4 +173,66 @@ func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 	}
 
 	return &res.User, oldAvatarStr, nil
+}
+
+func (r *UserRepository) UpdateDeliveryInfo(ctx context.Context, input *domain.User) (*domain.User, error) {
+	query := `
+			UPDATE users_schema.users
+			SET city = $1, street = $2, building = $3, porch = $4, floor = $5, flat = $6, updated_at = CURRENT_TIMESTAMP
+			WHERE id = $7
+			RETURNING *
+	`
+
+	rows, err := r.db.Query(ctx, query, input.City, input.Street, input.Building, input.Porch, input.Floor, input.Flat, input.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, newPasswordHash string) (*domain.User, error) {
+	query := `
+		UPDATE users_schema.users
+		SET password_hash = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+		RETURNING *
+	`
+
+	rows, err := r.db.Query(ctx, query, newPasswordHash, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *UserRepository) DeleteUser(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		DELETE FROM users_schema.users
+		WHERE id = $1
+	`
+
+	cmdTag, err := r.db.Exec(ctx, query, userID)
+	if err != nil {
+		return err
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return domain.ErrUserNotFound
+	}
+
+	return nil
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var ErrSessionNotFound = errors.New("session not found")
+var ErrSessionNotFound = domain.ErrSessionNotFound
 
 type SessionRepository struct {
 	client *redis.Client
@@ -30,7 +30,7 @@ func (r *SessionRepository) CreateSession(ctx context.Context, session *domain.R
 
 	ttl := time.Until(session.ExpiresAt)
 	if ttl <= 0 {
-		return errors.New("expiration time must be in the future")
+		return errors.New("Expiration time must be in the future")
 	}
 
 	key := "session:" + session.RefreshToken

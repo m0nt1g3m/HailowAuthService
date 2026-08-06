@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	"net"
 	"os"
 	"strconv"
 
@@ -39,19 +37,12 @@ func main() {
 		log.Fatalf("Invalid PORT value '%s': %v", portStr, err)
 	}
 
-	grpcServer, err := server.Init(addr, port)
+	srv, err := server.Init(addr, port)
 	if err != nil {
 		logger.Log.Fatalf("Failed to initialize server: %v", err)
 	}
 
-	listenAddr := fmt.Sprintf("%s:%d", addr, port)
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		logger.Log.Fatalf("Failed to listen on %s: %v", listenAddr, err)
-	}
-
-	logger.Log.Infof("gRPC server started on %s", listenAddr)
-	if err := grpcServer.Serve(listener); err != nil {
-		logger.Log.Fatalf("gRPC server stopped with error: %v", err)
+	if err := srv.Run(); err != nil {
+		logger.Log.Fatalf("Failed to run server: %v", err)
 	}
 }

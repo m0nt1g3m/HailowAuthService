@@ -27,7 +27,7 @@ func (r *Role) Scan(value any) error {
 	case []byte:
 		*r = Role(v)
 	default:
-		return fmt.Errorf("cannot scan %T into domain.Role", value)
+		return fmt.Errorf("Cannot scan %T into domain.Role", value)
 	}
 	return nil
 }
@@ -51,7 +51,6 @@ type RefreshSession struct {
 	ID           string
 	UserID       uuid.UUID
 	RefreshToken string
-	Fingerprint  string
 	CreatedAt    time.Time
 	ExpiresAt    time.Time
 }
