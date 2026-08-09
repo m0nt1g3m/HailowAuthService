@@ -21,6 +21,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Initialize submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -45,7 +52,7 @@ jobs:
           sudo apt-get install -y protobuf-compiler
 
       - name: Build proto files
-        run: task build_proto
+        run: task --taskfile HailowProto/Taskfile.yml build_go
 
       - name: Run tests
         run: go test ./cmd/... ./internal/... ./pkg/...
