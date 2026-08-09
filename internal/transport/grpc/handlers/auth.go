@@ -194,7 +194,7 @@ func (h *AuthHandler) GetProfile(ctx context.Context, req *pb.GetProfileRequest)
 	return &pb.GetProfileResponse{User: mapUser(user)}, nil
 }
 
-func (h *AuthHandler) ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) (*pb.UpdatePasswordResponse, error) {
+func (h *AuthHandler) ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) (*pb.ResetPasswordResponse, error) {
 	accessToken := getAccessTokenFromContext(ctx)
 	if err := h.usecase.ValidateTokenForUser(ctx, accessToken, req.GetId()); err != nil {
 		logger.Log.Errorf("ResetPassword unauthorized: %v", err)
@@ -207,7 +207,7 @@ func (h *AuthHandler) ResetPassword(ctx context.Context, req *pb.ResetPasswordRe
 		return nil, errorcode.ToStatus(err)
 	}
 
-	return &pb.UpdatePasswordResponse{Success: true}, nil
+	return &pb.ResetPasswordResponse{Success: true}, nil
 }
 
 func (h *AuthHandler) DeleteAccount(ctx context.Context, req *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {

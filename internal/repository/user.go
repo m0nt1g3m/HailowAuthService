@@ -157,8 +157,11 @@ func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, ava
 		return nil, "", domain.ErrUserNotFound
 	}
 
+	// Temporary result shape used to map the updated user row and the previous avatar URL.
 	type result struct {
-		domain.User  `pgx:",inline"`
+		// Embed the user fields directly so pgx can map them from the returned row.
+		domain.User `pgx:",inline"`
+		// Capture the previous avatar URL from the SQL result.
 		OldAvatarURL *string `db:"old_avatar_url"`
 	}
 

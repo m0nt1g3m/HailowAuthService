@@ -66,7 +66,7 @@ func Init(addr string, port int) (*Server, error) {
 
 	redisClient, err := cache.NewRedisClient(redisAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+		return nil, fmt.Errorf("Failed to connect to Redis: %w", err)
 	}
 
 	sessionRepo := redis_repository.NewSessionRepository(redisClient)
@@ -112,7 +112,7 @@ func (s *Server) Run() error {
 	listenAddr := fmt.Sprintf("%s:%d", s.addr, s.port)
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return fmt.Errorf("listen: %w", err)
+		return fmt.Errorf("Listen: %w", err)
 	}
 	s.listener = ln
 

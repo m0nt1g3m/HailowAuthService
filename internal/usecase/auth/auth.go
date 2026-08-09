@@ -23,7 +23,6 @@ type AuthUseCase struct {
 	repo       *redis_repository.SessionRepository
 	userRepo   *repository.UserRepository
 	s3Client   *s3storage.S3Client
-	jwtSecret  []byte
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 }
