@@ -27,13 +27,11 @@ COPY --from=builder /go/bin/task /usr/local/bin/task
 COPY --from=builder /go/bin/migrate /usr/local/bin/migrate
 COPY Taskfile.yml /app/Taskfile.yml
 COPY migrations /app/migrations
+COPY .env /app/.env
 
-RUN printf '#!/bin/sh\nset -e\ncd /app\nif [ -z "$DATABASE_URL" ]; then echo "DATABASE_URL is required" >&2; exit 1; fi\nurl="${DATABASE_URL#*://}"\nhostport="${url#*@}"\nDB_HOST="${hostport%%:*}"\nDB_PORT="${hostport#*:}"\nDB_PORT="${DB_PORT%%/*}"\necho "Waiting for database at $DB_HOST:$DB_PORT"\nwhile ! nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do echo "Database not ready, retrying..."; sleep 1; done\ntask migrate_up\nexec /HailowAuthService\n' > /app/entrypoint.sh \
+RUN printf '#!/bin/sh\nset -e\ncd /app\nif [ -z "$DATABASE_URL" ]; then echo "DATABASE_URL is required" >&2; exit 1; fi\nif [ -z "$AUTH_SERVICE_PORT" ] && [ -n "$PORT" ]; then export AUTH_SERVICE_PORT="$PORT"; fi\nurl="${DATABASE_URL#*://}"\nhostport="${url#*@}"\nDB_HOST="${hostport%%:*}"\nDB_PORT="${hostport#*:}"\nDB_PORT="${DB_PORT%%/*}"\necho "Waiting for database at $DB_HOST:$DB_PORT"\nwhile ! nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; do echo "Database not ready, retrying..."; sleep 1; done\ntask migrate_up\nexec /HailowAuthService\n' > /app/entrypoint.sh \
     && chmod +x /app/entrypoint.sh
 
-EXPOSE 8080
-
-ENV ADDR=0.0.0.0
-ENV PORT=8080
+EXPOSE 50001
 
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -22,7 +22,7 @@ func main() {
 	}
 	logger.InitLogger(env)
 
-	addr := os.Getenv("ADDR")
+	addr := os.Getenv("AUTH_SERVICE_ADDR")
 	if addr == "" {
 		addr = "localhost"
 	}
