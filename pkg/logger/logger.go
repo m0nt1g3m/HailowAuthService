@@ -17,7 +17,7 @@ func InitLogger(env string) {
 	logFile := filepath.Join(logDir, "app.log")
 
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		fmt.Printf("Не удалось создать директорию для логов: %v\n", err.Error())
+		fmt.Printf("Failed to create log directory: %v\n", err.Error())
 		os.Exit(1)
 	}
 
@@ -44,7 +44,7 @@ func InitLogger(env string) {
 	}
 	logFileWriter, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		println("Не удалось открыть файл логов: " + err.Error())
+		println("Failed to open log file: " + err.Error())
 		os.Exit(1)
 	}
 

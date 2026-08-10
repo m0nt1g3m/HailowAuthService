@@ -28,6 +28,7 @@ import (
 
 type Server struct {
 	grpcServer  *grpc.Server
+	debug       bool
 	addr        string
 	port        int
 	listener    net.Listener
@@ -36,16 +37,20 @@ type Server struct {
 	s3Client    *s3storage.S3Client
 }
 
-func Init(addr string, port int) (*Server, error) {
+func Init(debug bool, addr string, port int) (*Server, error) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	logger.InitLogger("development")
+	if debug {
+		logger.InitLogger("development")
+	} else {
+		logger.InitLogger("production")
+	}
+
 	logger.Log.Infof("Initializing gRPC server on %s:%d", addr, port)
 
-	debug := os.Getenv("DEBUG")
 	var dbURL string
 	var redisAddr string
 
-	if debug == "true" {
+	if debug {
 		dbURL = os.Getenv("DEV_DATABASE_URL")
 	} else {
 		dbURL = os.Getenv("DATABASE_URL")
@@ -54,7 +59,7 @@ func Init(addr string, port int) (*Server, error) {
 	pool := database.InitDB(dbURL)
 	userRepo := repository.NewUserRepository(pool)
 
-	if debug == "true" {
+	if debug {
 		redisAddr = strings.Join([]string{os.Getenv("DEV_REDIS_HOST"), os.Getenv("DEV_REDIS_PORT")}, ":")
 	} else {
 		redisAddr = strings.Join([]string{os.Getenv("REDIS_HOST"), os.Getenv("REDIS_PORT")}, ":")
@@ -100,6 +105,7 @@ func Init(addr string, port int) (*Server, error) {
 
 	return &Server{
 		grpcServer:  grpcServer,
+		debug:       debug,
 		addr:        addr,
 		port:        port,
 		dbPool:      pool,
