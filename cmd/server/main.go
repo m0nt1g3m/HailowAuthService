@@ -14,10 +14,10 @@ import (
 func main() {
 	if _, err := os.Stat(".env"); err == nil {
 		if err := godotenv.Load(); err != nil {
-			slog.Warn(fmt.Sprintf("Warning: error loading .env: %v", err))
+			slog.Warn(fmt.Sprintf("Failed to load .env: %v", err))
 		}
 	} else if !os.IsNotExist(err) {
-		slog.Warn(fmt.Sprintf("Warning: error checking .env file: %v", err))
+		slog.Warn(fmt.Sprintf("Failed to check .env file: %v", err))
 	}
 
 	debug := false
