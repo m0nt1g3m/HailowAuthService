@@ -169,7 +169,8 @@ func (h *AuthHandler) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.Lo
 }
 
 func (h *AuthHandler) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error) {
-	err := h.usecase.ValidateToken(ctx, req.AccessToken)
+	accessToken := getAccessTokenFromContext(ctx)
+	err := h.usecase.ValidateToken(ctx, accessToken)
 	if err != nil {
 		logger.Log.Errorf("ValidateToken error: %v", err)
 		return nil, errorcode.ToStatus(err)

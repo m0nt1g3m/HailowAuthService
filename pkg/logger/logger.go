@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -11,13 +12,13 @@ import (
 
 var Log *zap.SugaredLogger
 
-func InitLogger(env string) {
+func InitLogger(env string) *zap.SugaredLogger {
 
 	logDir := "logs"
 	logFile := filepath.Join(logDir, "app.log")
 
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		fmt.Printf("Failed to create log directory: %v\n", err.Error())
+		slog.Error(fmt.Sprintf("Failed to create log directory: %v\n", err.Error()))
 		os.Exit(1)
 	}
 
@@ -32,7 +33,7 @@ func InitLogger(env string) {
 	consoleConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 
 	fileConfig := encoderConfig
-	fileConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	fileConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 
 	var consoleEncoder, fileEncoder zapcore.Encoder
 	if env == "production" {
@@ -44,7 +45,7 @@ func InitLogger(env string) {
 	}
 	logFileWriter, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		println("Failed to open log file: " + err.Error())
+		slog.Error(fmt.Sprintf("Failed to open log file: %v\n", err.Error()))
 		os.Exit(1)
 	}
 
@@ -61,4 +62,5 @@ func InitLogger(env string) {
 	logger := zap.New(coreLogger, zap.WithCaller(false))
 
 	Log = logger.Sugar()
+	return Log
 }

@@ -36,12 +36,6 @@ func (r Role) Value() (driver.Value, error) {
 	return string(r), nil
 }
 
-type Claims struct {
-	ID        uuid.UUID
-	Username  string
-	ExpiresAt time.Time
-}
-
 type TokenPair struct {
 	AccessToken  string
 	RefreshToken string

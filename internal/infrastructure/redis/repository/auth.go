@@ -5,20 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-var ErrSessionNotFound = domain.ErrSessionNotFound
-
 type SessionRepository struct {
-	client *redis.Client
+	client     *redis.Client
+	prefix_key string
 }
 
 func NewSessionRepository(client *redis.Client) *SessionRepository {
 	return &SessionRepository{
-		client: client,
+		client:     client,
+		prefix_key: "session",
 	}
 }
 
@@ -33,15 +34,15 @@ func (r *SessionRepository) CreateSession(ctx context.Context, session *domain.R
 		return errors.New("Expiration time must be in the future")
 	}
 
-	key := "session:" + session.RefreshToken
+	key := r.prefix_key + session.RefreshToken
 	return r.client.Set(ctx, key, data, ttl).Err()
 }
 
 func (r *SessionRepository) GetSessionByToken(ctx context.Context, token string) (*domain.RefreshSession, error) {
-	key := "session:" + token
+	key := fmt.Sprintf("%s:%s", r.prefix_key, token)
 	data, err := r.client.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
-		return nil, ErrSessionNotFound
+		return nil, domain.ErrSessionNotFound
 	} else if err != nil {
 		return nil, err
 	}
@@ -55,13 +56,13 @@ func (r *SessionRepository) GetSessionByToken(ctx context.Context, token string)
 }
 
 func (r *SessionRepository) DeleteSession(ctx context.Context, token string) error {
-	key := "session:" + token
+	key := fmt.Sprintf("%s:%s", r.prefix_key, token)
 	result, err := r.client.Del(ctx, key).Result()
 	if err != nil {
 		return err
 	}
 	if result == 0 {
-		return ErrSessionNotFound
+		return domain.ErrSessionNotFound
 	}
 	return nil
 }

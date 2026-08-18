@@ -37,7 +37,7 @@ func main() {
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		slog.Error(fmt.Sprintf("Invalid PORT value '%s': %v", portStr, err))
+		slog.Error(fmt.Sprintf("Invalid AUTH_SERVICE_PORT value '%s': %v", portStr, err))
 	}
 
 	srv, err := server.Init(debug, addr, port)
