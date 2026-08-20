@@ -29,17 +29,16 @@ type AuthUseCase struct {
 
 type Usecase interface {
 	SignUp(ctx context.Context, input *domain.UserInfo) (*domain.User, error)
-	SignIn(ctx context.Context, input *domain.UserInfo) (*domain.TokenPair, error)
+	SignIn(ctx context.Context, input *domain.UserInfo) (*domain.TokenPair, string, error)
 	RefreshTokens(ctx context.Context, refreshToken string) (*domain.TokenPair, error)
 	ValidateToken(ctx context.Context, accessToken string) error
-	ValidateTokenForUser(ctx context.Context, accessToken string, userID string) error
 	Logout(ctx context.Context, refreshToken string) error
-	UploadAvatar(ctx context.Context, accessToken string, userID string, avatarImage []byte, contentType string) (*domain.User, error)
+	UploadAvatar(ctx context.Context, userID string, avatarImage []byte, contentType string) (*domain.User, error)
 	UpdateProfile(ctx context.Context, input *domain.User) (*domain.User, error)
 	UpdateDeliveryInfo(ctx context.Context, input *domain.User) (*domain.User, error)
 	GetProfile(ctx context.Context, userID string) (*domain.User, error)
 	ResetPassword(ctx context.Context, userID string, newPassword string) error
-	DeleteAccount(ctx context.Context, accessToken string, userID string) error
+	DeleteAccount(ctx context.Context, userID string) error
 }
 
 type jwtClaims struct {
@@ -88,26 +87,26 @@ func (u *AuthUseCase) SignUp(ctx context.Context, input *domain.UserInfo) (*doma
 	return user, nil
 }
 
-func (u *AuthUseCase) SignIn(ctx context.Context, input *domain.UserInfo) (*domain.TokenPair, error) {
+func (u *AuthUseCase) SignIn(ctx context.Context, input *domain.UserInfo) (*domain.TokenPair, string, error) {
 	if input.Email == "" || input.Password == "" {
-		return nil, domain.ErrInvalidCredentials
+		return nil, "", domain.ErrInvalidCredentials
 	}
 
 	user, err := u.userRepo.GetByEmail(ctx, input.Email)
 	if err != nil {
-		return nil, domain.ErrInvalidCredentials
+		return nil, "", domain.ErrInvalidCredentials
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
-		return nil, domain.ErrInvalidCredentials
+		return nil, "", domain.ErrInvalidCredentials
 	}
 
 	tokens, err := u.generateTokenPair(ctx, user)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return tokens, nil
+	return tokens, user.ID, nil
 }
 
 func (u *AuthUseCase) RefreshTokens(ctx context.Context, refreshToken string) (*domain.TokenPair, error) {
@@ -139,32 +138,9 @@ func (u *AuthUseCase) ValidateToken(ctx context.Context, accessToken string) err
 		return domain.ErrUnauthorized
 	}
 
-	_, err = u.userRepo.GetByEmail(ctx, claims.Email)
+	_, err = u.userRepo.GetByID(ctx, claims.ID)
 	if err != nil {
 		return domain.ErrUserNotFound
-	}
-
-	return nil
-}
-
-func (u *AuthUseCase) ValidateTokenForUser(ctx context.Context, accessToken string, userID string) error {
-	claims, err := u.parseAccessToken(accessToken)
-	if err != nil {
-		return domain.ErrUnauthorized
-	}
-
-	parsedUserID, err := uuid.Parse(userID)
-	if err != nil {
-		return fmt.Errorf("Invalid user id: %w", err)
-	}
-
-	if claims.ID != parsedUserID {
-		return domain.ErrUnauthorized
-	}
-
-	_, err = u.userRepo.GetByID(ctx, parsedUserID)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -298,10 +274,7 @@ func (u *AuthUseCase) parseAccessToken(tokenStr string) (*jwtClaims, error) {
 	return &claims, nil
 }
 
-func (u *AuthUseCase) UploadAvatar(ctx context.Context, accessToken string, userID string, avatarImage []byte, contentType string) (*domain.User, error) {
-	if accessToken == "" {
-		return nil, domain.ErrUnauthorized
-	}
+func (u *AuthUseCase) UploadAvatar(ctx context.Context, userID string, avatarImage []byte, contentType string) (*domain.User, error) {
 	if userID == "" {
 		return nil, domain.ErrUserNotFound
 	}
@@ -313,10 +286,6 @@ func (u *AuthUseCase) UploadAvatar(ctx context.Context, accessToken string, user
 	}
 	if contentType == "" {
 		contentType = http.DetectContentType(avatarImage)
-	}
-
-	if err := u.ValidateToken(ctx, accessToken); err != nil {
-		return nil, err
 	}
 
 	parsedUserID, err := uuid.Parse(userID)
@@ -420,16 +389,9 @@ func (u *AuthUseCase) ResetPassword(ctx context.Context, userID string, newPassw
 	return nil
 }
 
-func (u *AuthUseCase) DeleteAccount(ctx context.Context, accessToken string, userID string) error {
-	if accessToken == "" {
-		return domain.ErrUnauthorized
-	}
+func (u *AuthUseCase) DeleteAccount(ctx context.Context, userID string) error {
 	if userID == "" {
 		return domain.ErrUserNotFound
-	}
-
-	if err := u.ValidateTokenForUser(ctx, accessToken, userID); err != nil {
-		return err
 	}
 
 	parsedUserID, err := uuid.Parse(userID)

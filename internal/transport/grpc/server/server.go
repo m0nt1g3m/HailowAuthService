@@ -97,6 +97,7 @@ func Init(debug bool, addr string, port int) (*Server, error) {
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			interceptors.RecoveryInterceptor(),
+			interceptors.AuthInterceptor(),
 			interceptors.LoggingInterceptor(),
 		),
 	)

@@ -6,11 +6,14 @@ import (
 
 	pb "HailowAuthService/HailowProto/build/go/AuthService/v1"
 	"HailowAuthService/internal/domain"
+	"HailowAuthService/internal/transport/grpc/interceptors"
 	"HailowAuthService/internal/transport/grpc/response/errorcode"
 	"HailowAuthService/internal/usecase/auth"
 	"HailowAuthService/pkg/logger"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -21,6 +24,30 @@ type AuthHandler struct {
 
 func NewAuthHandler(usecase auth.Usecase) *AuthHandler {
 	return &AuthHandler{usecase: usecase}
+}
+
+func checkPermissions(ctx context.Context, targetUserID string) error {
+	callerID, ok := ctx.Value(interceptors.ContextUserIDKey).(string)
+	logger.Log.Debugf("checkOwnership: callerID=%s, targetUserID=%s", callerID, targetUserID)
+
+	if !ok || callerID == "" {
+		return status.Error(codes.Unauthenticated, "unauthorized")
+	}
+
+	// Checking the user's role from the context
+	callerRole, _ := ctx.Value(interceptors.ContextUserRoleKey).(string)
+
+	// The admin can perform any actions
+	if callerRole == string(domain.RoleAdmin) {
+		return nil
+	}
+
+	// A customer can only edit their own profile
+	if callerID != targetUserID {
+		return status.Error(codes.PermissionDenied, "Access denied")
+	}
+
+	return nil
 }
 
 func (h *AuthHandler) AdminSignUp(ctx context.Context, req *pb.AdminSignUpRequest) (*pb.AdminSignUpResponse, error) {
@@ -70,23 +97,21 @@ func (h *AuthHandler) SignIn(ctx context.Context, req *pb.SignInRequest) (*pb.Si
 		Email:    req.GetEmail(),
 		Password: req.GetPassword(),
 	}
-	tokens, err := h.usecase.SignIn(ctx, input)
+	tokens, userID, err := h.usecase.SignIn(ctx, input)
 	if err != nil {
 		logger.Log.Errorf("SignIn error: %v", err)
 		return nil, errorcode.ToStatus(err)
 	}
 
-	return &pb.SignInResponse{Tokens: mapTokenPair(tokens)}, nil
+	return &pb.SignInResponse{Id: userID, Tokens: mapTokenPair(tokens)}, nil
 }
 
 func (h *AuthHandler) UploadAvatar(ctx context.Context, req *pb.UploadAvatarRequest) (*pb.UploadAvatarResponse, error) {
-	accessToken := getAccessTokenFromContext(ctx)
-	if err := h.usecase.ValidateTokenForUser(ctx, accessToken, req.GetUserId()); err != nil {
-		logger.Log.Errorf("UploadAvatar unauthorized: %v", err)
-		return nil, errorcode.ToStatus(err)
+	if err := checkPermissions(ctx, req.GetUserId()); err != nil {
+		return nil, err
 	}
 
-	user, err := h.usecase.UploadAvatar(ctx, accessToken, req.GetUserId(), req.GetAvatarImage(), "")
+	user, err := h.usecase.UploadAvatar(ctx, req.GetUserId(), req.GetAvatarImage(), "")
 	if err != nil {
 		logger.Log.Errorf("UploadAvatar error: %v", err)
 		return nil, errorcode.ToStatus(err)
@@ -100,12 +125,9 @@ func (h *AuthHandler) UploadAvatar(ctx context.Context, req *pb.UploadAvatarRequ
 }
 
 func (h *AuthHandler) UpdateProfile(ctx context.Context, req *pb.UpdateProfileRequest) (*pb.UpdateProfileResponse, error) {
-	accessToken := getAccessTokenFromContext(ctx)
-	if err := h.usecase.ValidateTokenForUser(ctx, accessToken, req.GetId()); err != nil {
-		logger.Log.Errorf("UpdateProfile unauthorized: %v", err)
-		return nil, errorcode.ToStatus(err)
+	if err := checkPermissions(ctx, req.GetId()); err != nil {
+		return nil, err
 	}
-
 	input := &domain.User{
 		ID:          req.GetId(),
 		FirstName:   req.GetFirstName(),
@@ -124,12 +146,9 @@ func (h *AuthHandler) UpdateProfile(ctx context.Context, req *pb.UpdateProfileRe
 }
 
 func (h *AuthHandler) UpdateDeliveryInfo(ctx context.Context, req *pb.UpdateDeliveryInfoRequest) (*pb.UpdateDeliveryInfoResponse, error) {
-	accessToken := getAccessTokenFromContext(ctx)
-	if err := h.usecase.ValidateTokenForUser(ctx, accessToken, req.GetId()); err != nil {
-		logger.Log.Errorf("UpdateDeliveryInfo unauthorized: %v", err)
-		return nil, errorcode.ToStatus(err)
+	if err := checkPermissions(ctx, req.GetId()); err != nil {
+		return nil, err
 	}
-
 	input := &domain.User{
 		ID:       req.GetId(),
 		City:     req.GetCity(),
@@ -160,7 +179,19 @@ func (h *AuthHandler) RefreshTokens(ctx context.Context, req *pb.RefreshTokensRe
 }
 
 func (h *AuthHandler) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.LogoutResponse, error) {
-	if err := h.usecase.Logout(ctx, req.RefreshToken); err != nil {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, status.Errorf(codes.Unauthenticated, "refresh_token is not found")
+	}
+
+	tokens := md.Get("refresh_token")
+	if len(tokens) == 0 {
+		return nil, status.Errorf(codes.Unauthenticated, "refresh_token is not found")
+	}
+
+	refreshToken := tokens[0]
+	logger.Log.Debugf("RefreshToken: %s", refreshToken)
+	if err := h.usecase.Logout(ctx, refreshToken); err != nil {
 		logger.Log.Errorf("Logout error: %v", err)
 		return nil, errorcode.ToStatus(err)
 	}
@@ -180,12 +211,9 @@ func (h *AuthHandler) ValidateToken(ctx context.Context, req *pb.ValidateTokenRe
 }
 
 func (h *AuthHandler) GetProfile(ctx context.Context, req *pb.GetProfileRequest) (*pb.GetProfileResponse, error) {
-	accessToken := getAccessTokenFromContext(ctx)
-	if err := h.usecase.ValidateTokenForUser(ctx, accessToken, req.GetId()); err != nil {
-		logger.Log.Errorf("GetProfile unauthorized: %v", err)
-		return nil, errorcode.ToStatus(err)
+	if err := checkPermissions(ctx, req.GetId()); err != nil {
+		return nil, err
 	}
-
 	user, err := h.usecase.GetProfile(ctx, req.GetId())
 	if err != nil {
 		logger.Log.Errorf("GetProfile error: %v", err)
@@ -196,12 +224,9 @@ func (h *AuthHandler) GetProfile(ctx context.Context, req *pb.GetProfileRequest)
 }
 
 func (h *AuthHandler) ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) (*pb.ResetPasswordResponse, error) {
-	accessToken := getAccessTokenFromContext(ctx)
-	if err := h.usecase.ValidateTokenForUser(ctx, accessToken, req.GetId()); err != nil {
-		logger.Log.Errorf("ResetPassword unauthorized: %v", err)
-		return nil, errorcode.ToStatus(err)
+	if err := checkPermissions(ctx, req.GetId()); err != nil {
+		return nil, err
 	}
-
 	err := h.usecase.ResetPassword(ctx, req.GetId(), req.GetNewPassword())
 	if err != nil {
 		logger.Log.Errorf("ResetPassword error: %v", err)
@@ -212,13 +237,10 @@ func (h *AuthHandler) ResetPassword(ctx context.Context, req *pb.ResetPasswordRe
 }
 
 func (h *AuthHandler) DeleteAccount(ctx context.Context, req *pb.DeleteAccountRequest) (*pb.DeleteAccountResponse, error) {
-	accessToken := getAccessTokenFromContext(ctx)
-	if err := h.usecase.ValidateTokenForUser(ctx, accessToken, req.GetId()); err != nil {
-		logger.Log.Errorf("DeleteAccount unauthorized: %v", err)
-		return nil, errorcode.ToStatus(err)
+	if err := checkPermissions(ctx, req.GetId()); err != nil {
+		return nil, err
 	}
-
-	err := h.usecase.DeleteAccount(ctx, accessToken, req.GetId())
+	err := h.usecase.DeleteAccount(ctx, req.GetId())
 	if err != nil {
 		logger.Log.Errorf("DeleteAccount error: %v", err)
 		return nil, errorcode.ToStatus(err)

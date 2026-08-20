@@ -34,7 +34,7 @@ func (r *SessionRepository) CreateSession(ctx context.Context, session *domain.R
 		return errors.New("Expiration time must be in the future")
 	}
 
-	key := r.prefix_key + session.RefreshToken
+	key := fmt.Sprintf("%s:%s", r.prefix_key, session.RefreshToken)
 	return r.client.Set(ctx, key, data, ttl).Err()
 }
 
