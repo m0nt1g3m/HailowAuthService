@@ -2,9 +2,12 @@ package interceptors
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
+	"HailowAuthService/internal/domain"
+	"HailowAuthService/internal/transport/grpc/response/errorcode"
 	"HailowAuthService/pkg/logger"
 
 	"google.golang.org/grpc"
@@ -16,8 +19,9 @@ import (
 type ContextKey string
 
 const (
-	ContextUserIDKey   ContextKey = "user_id"
-	ContextUserRoleKey ContextKey = "user_role"
+	ContextUserIDKey       ContextKey = "user_id"
+	ContextUserRoleKey     ContextKey = "user_role"
+	ContextRefreshTokenKey ContextKey = "refresh_token"
 )
 
 func LoggingInterceptor() grpc.UnaryServerInterceptor {
@@ -45,37 +49,70 @@ func LoggingInterceptor() grpc.UnaryServerInterceptor {
 
 func AuthInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		if !(strings.HasSuffix(info.FullMethod, "SignIn") || strings.HasSuffix(info.FullMethod, "SignUp")) {
-			md, ok := metadata.FromIncomingContext(ctx)
-			if ok {
-				if userIDs := md.Get("x-user-id"); len(userIDs) > 0 && userIDs[0] != "" {
-					ctx = context.WithValue(ctx, ContextUserIDKey, userIDs[0])
-				} else if userIDs := md.Get("user-id"); len(userIDs) > 0 && userIDs[0] != "" {
-					ctx = context.WithValue(ctx, ContextUserIDKey, userIDs[0])
-				}
+		if strings.HasSuffix(info.FullMethod, "SignIn") || strings.HasSuffix(info.FullMethod, "SignUp") {
+			return handler(ctx, req)
+		}
 
-				if userRoles := md.Get("x-user-role"); len(userRoles) > 0 && userRoles[0] != "" {
-					ctx = context.WithValue(ctx, ContextUserRoleKey, userRoles[0])
-				} else if userRoles := md.Get("user-role"); len(userRoles) > 0 && userRoles[0] != "" {
-					ctx = context.WithValue(ctx, ContextUserRoleKey, userRoles[0])
-				}
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, errorcode.ToStatus(domain.ErrMDNotFound)
+		}
+
+		var userID string
+		if userIDs := md.Get("x-user-id"); len(userIDs) > 0 && userIDs[0] != "" {
+			userID = userIDs[0]
+		} else if userIDs := md.Get("user-id"); len(userIDs) > 0 && userIDs[0] != "" {
+			userID = userIDs[0]
+		}
+
+		var userRole string
+		if userRoles := md.Get("x-user-role"); len(userRoles) > 0 && userRoles[0] != "" {
+			userRole = userRoles[0]
+		} else if userRoles := md.Get("user-role"); len(userRoles) > 0 && userRoles[0] != "" {
+			userRole = userRoles[0]
+		}
+
+		if userID == "" {
+			return nil, errorcode.ToStatus(domain.ErrUserIDNotFoundMD)
+		}
+
+		ctx = context.WithValue(ctx, ContextUserIDKey, userID)
+		ctx = context.WithValue(ctx, ContextUserRoleKey, userRole)
+
+		return handler(ctx, req)
+	}
+}
+
+func RefreshTokenInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if strings.HasSuffix(info.FullMethod, "RefreshTokens") || strings.HasSuffix(info.FullMethod, "Logout") {
+			md, ok := metadata.FromIncomingContext(ctx)
+			if !ok {
+				return nil, errorcode.ToStatus(domain.ErrRefreshTokenMD)
 			}
+
+			tokens := md.Get("refresh-token")
+			logger.Log.Debugf("refresh-token from metadata: %s", tokens[0])
+			if len(tokens) == 0 || tokens[0] == "" {
+				return nil, errorcode.ToStatus(domain.ErrRefreshTokenMD)
+			}
+
+			ctx = context.WithValue(ctx, ContextRefreshTokenKey, tokens[0])
 		}
 
 		return handler(ctx, req)
 	}
 }
+
 func RecoveryInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Log.Errorf("Panic recovered in gRPC interceptor: %v", r)
+				err = status.Errorf(codes.Internal, "Internal server error: %v", fmt.Sprint(r))
 			}
 		}()
-		resp, err := handler(ctx, req)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Internal server error")
-		}
-		return resp, nil
+
+		return handler(ctx, req)
 	}
 }

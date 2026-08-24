@@ -44,7 +44,10 @@ type TokenPair struct {
 type RefreshSession struct {
 	ID           string
 	UserID       uuid.UUID
+	DeviceID     string
 	RefreshToken string
+	UserAgent    string
+	IP           string
 	CreatedAt    time.Time
 	ExpiresAt    time.Time
 }

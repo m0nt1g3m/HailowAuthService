@@ -12,6 +12,7 @@ import (
 	"HailowAuthService/internal/domain"
 	redis_repository "HailowAuthService/internal/infrastructure/redis/repository"
 	"HailowAuthService/internal/repository"
+	"HailowAuthService/pkg/logger"
 	s3storage "HailowAuthService/pkg/s3"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -52,10 +53,27 @@ type jwtClaims struct {
 }
 
 func NewAuthUsecase(userRepo *repository.UserRepository, repo *redis_repository.SessionRepository, s3Client *s3storage.S3Client) *AuthUseCase {
+	accessTTL := 15 * time.Minute
+	if env := os.Getenv("AUTH_ACCESS_TTL"); env != "" {
+		if parsed, err := time.ParseDuration(env); err == nil && parsed > 0 {
+			accessTTL = parsed
+		}
+	}
+
+	refreshTTL := 7 * 24 * time.Hour
+	if env := os.Getenv("AUTH_REFRESH_TTL"); env != "" {
+		if parsed, err := time.ParseDuration(env); err == nil && parsed > 0 {
+			refreshTTL = parsed
+		}
+	}
+	logger.Log.Debugf("Access TTL: %s", accessTTL)
+	logger.Log.Debugf("Refresh TTL: %s", refreshTTL)
 	return &AuthUseCase{
-		repo:     repo,
-		userRepo: userRepo,
-		s3Client: s3Client,
+		repo:       repo,
+		userRepo:   userRepo,
+		s3Client:   s3Client,
+		accessTTL:  accessTTL,
+		refreshTTL: refreshTTL,
 	}
 }
 
@@ -153,127 +171,6 @@ func (u *AuthUseCase) Logout(ctx context.Context, refreshToken string) error {
 	return u.repo.DeleteSession(ctx, refreshToken)
 }
 
-func (u *AuthUseCase) generateTokenPair(ctx context.Context, user *domain.User) (*domain.TokenPair, error) {
-	now := time.Now()
-
-	accessClaims := jwtClaims{
-		ID:        uuid.MustParse(user.ID),
-		Email:     user.Email,
-		Role:      string(user.Role),
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		TokenType: "access",
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
-			IssuedAt:  jwt.NewNumericDate(now),
-		},
-	}
-
-	accessTokenStr, err := u.generateAccessToken(accessClaims)
-	if err != nil {
-		return nil, err
-	}
-
-	refreshClaims := jwtClaims{
-		ID:        uuid.MustParse(user.ID),
-		Email:     user.Email,
-		Role:      string(user.Role),
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		TokenType: "refresh",
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(now),
-		},
-	}
-
-	refreshTokenStr, err := u.generateRefreshTokenWithClaims(refreshClaims)
-	if err != nil {
-		return nil, err
-	}
-
-	session := &domain.RefreshSession{
-		UserID:       uuid.MustParse(user.ID),
-		RefreshToken: refreshTokenStr,
-		CreatedAt:    now,
-		ExpiresAt:    now.Add(24 * time.Hour),
-	}
-
-	if err := u.repo.CreateSession(ctx, session); err != nil {
-		return nil, err
-	}
-
-	return &domain.TokenPair{
-		AccessToken:  accessTokenStr,
-		RefreshToken: refreshTokenStr,
-	}, nil
-}
-
-func (u *AuthUseCase) generateAccessTokenOnly(user *domain.User, refreshToken string) (*domain.TokenPair, error) {
-	now := time.Now()
-	claims := jwtClaims{
-		ID:        uuid.MustParse(user.ID),
-		Email:     user.Email,
-		Role:      string(user.Role),
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
-			IssuedAt:  jwt.NewNumericDate(now),
-		},
-	}
-
-	accessTokenStr, err := u.generateAccessToken(claims)
-	if err != nil {
-		return nil, err
-	}
-
-	return &domain.TokenPair{
-		AccessToken:  accessTokenStr,
-		RefreshToken: refreshToken,
-	}, nil
-}
-
-func (u *AuthUseCase) generateAccessToken(claims jwtClaims) (string, error) {
-	accessTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return accessTokenObj.SignedString(u.getAccessSigningKey())
-}
-
-func (u *AuthUseCase) generateRefreshTokenWithClaims(claims jwtClaims) (string, error) {
-	refreshTokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return refreshTokenObj.SignedString(u.getRefreshSigningKey())
-}
-
-func (u *AuthUseCase) getAccessSigningKey() []byte {
-	if key := os.Getenv("JWT_ACCESS_KEY_CUSTOMER"); key != "" {
-		return []byte(key)
-	}
-	return []byte("secret")
-}
-
-func (u *AuthUseCase) getRefreshSigningKey() []byte {
-	if key := os.Getenv("JWT_REFRESH_KEY_CUSTOMER"); key != "" {
-		return []byte(key)
-	}
-	return []byte("secret")
-}
-
-func (u *AuthUseCase) parseAccessToken(tokenStr string) (*jwtClaims, error) {
-	var claims jwtClaims
-	token, err := jwt.ParseWithClaims(tokenStr, &claims, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, domain.ErrUnauthorized
-		}
-		return u.getAccessSigningKey(), nil
-	})
-
-	if err != nil || !token.Valid {
-		return nil, domain.ErrUnauthorized
-	}
-
-	return &claims, nil
-}
-
 func (u *AuthUseCase) UploadAvatar(ctx context.Context, userID string, avatarImage []byte, contentType string) (*domain.User, error) {
 	if userID == "" {
 		return nil, domain.ErrUserNotFound
@@ -364,9 +261,6 @@ func (u *AuthUseCase) GetProfile(ctx context.Context, userID string) (*domain.Us
 }
 
 func (u *AuthUseCase) ResetPassword(ctx context.Context, userID string, newPassword string) error {
-	if userID == "" {
-		return domain.ErrUserNotFound
-	}
 	if newPassword == "" {
 		return domain.ErrInvalidCredentials
 	}

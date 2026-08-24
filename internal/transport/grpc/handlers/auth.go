@@ -11,9 +11,7 @@ import (
 	"HailowAuthService/internal/usecase/auth"
 	"HailowAuthService/pkg/logger"
 
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -26,25 +24,25 @@ func NewAuthHandler(usecase auth.Usecase) *AuthHandler {
 	return &AuthHandler{usecase: usecase}
 }
 
-func checkPermissions(ctx context.Context, targetUserID string) error {
-	callerID, ok := ctx.Value(interceptors.ContextUserIDKey).(string)
-	logger.Log.Debugf("checkOwnership: callerID=%s, targetUserID=%s", callerID, targetUserID)
+func checkPermissions(ctx context.Context, tokenUserID string) error {
+	mdUserID, ok := ctx.Value(interceptors.ContextUserIDKey).(string)
+	logger.Log.Debugf("user-id from metadata: %s, user-id from refresh_token=%s", mdUserID, tokenUserID)
 
-	if !ok || callerID == "" {
-		return status.Error(codes.Unauthenticated, "unauthorized")
+	if !ok || mdUserID == "" {
+		return errorcode.ToStatus(domain.ErrUserIDNotFoundMD)
 	}
 
 	// Checking the user's role from the context
-	callerRole, _ := ctx.Value(interceptors.ContextUserRoleKey).(string)
+	userRole, _ := ctx.Value(interceptors.ContextUserRoleKey).(string)
 
 	// The admin can perform any actions
-	if callerRole == string(domain.RoleAdmin) {
+	if userRole == string(domain.RoleAdmin) {
 		return nil
 	}
 
 	// A customer can only edit their own profile
-	if callerID != targetUserID {
-		return status.Error(codes.PermissionDenied, "Access denied")
+	if mdUserID != tokenUserID {
+		return errorcode.ToStatus(domain.ErrPermissionDenied)
 	}
 
 	return nil
@@ -169,7 +167,12 @@ func (h *AuthHandler) UpdateDeliveryInfo(ctx context.Context, req *pb.UpdateDeli
 }
 
 func (h *AuthHandler) RefreshTokens(ctx context.Context, req *pb.RefreshTokensRequest) (*pb.RefreshTokensResponse, error) {
-	tokens, err := h.usecase.RefreshTokens(ctx, req.RefreshToken)
+	refreshToken, ok := ctx.Value(interceptors.ContextRefreshTokenKey).(string)
+
+	if !ok || refreshToken == "" {
+		return nil, errorcode.ToStatus(domain.ErrRefreshTokenMD)
+	}
+	tokens, err := h.usecase.RefreshTokens(ctx, refreshToken)
 	if err != nil {
 		logger.Log.Errorf("RefreshTokens error: %v", err)
 		return nil, errorcode.ToStatus(err)
@@ -179,18 +182,11 @@ func (h *AuthHandler) RefreshTokens(ctx context.Context, req *pb.RefreshTokensRe
 }
 
 func (h *AuthHandler) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.LogoutResponse, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, status.Errorf(codes.Unauthenticated, "refresh_token is not found")
-	}
+	refreshToken, ok := ctx.Value(interceptors.ContextRefreshTokenKey).(string)
 
-	tokens := md.Get("refresh_token")
-	if len(tokens) == 0 {
-		return nil, status.Errorf(codes.Unauthenticated, "refresh_token is not found")
+	if !ok || refreshToken == "" {
+		return nil, errorcode.ToStatus(domain.ErrRefreshTokenMD)
 	}
-
-	refreshToken := tokens[0]
-	logger.Log.Debugf("RefreshToken: %s", refreshToken)
 	if err := h.usecase.Logout(ctx, refreshToken); err != nil {
 		logger.Log.Errorf("Logout error: %v", err)
 		return nil, errorcode.ToStatus(err)
@@ -200,6 +196,9 @@ func (h *AuthHandler) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.Lo
 }
 
 func (h *AuthHandler) ValidateToken(ctx context.Context, req *pb.ValidateTokenRequest) (*pb.ValidateTokenResponse, error) {
+	if err := checkPermissions(ctx, req.GetId()); err != nil {
+		return nil, err
+	}
 	accessToken := getAccessTokenFromContext(ctx)
 	err := h.usecase.ValidateToken(ctx, accessToken)
 	if err != nil {
