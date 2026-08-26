@@ -152,6 +152,6 @@ func (s *Server) Run() error {
 		}
 	}
 
-	logger.Log.Info("Resources closed, gRPC server stopped")
+	logger.Log.Info("gRPC server stopped")
 	return nil
 }
