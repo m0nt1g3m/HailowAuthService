@@ -112,27 +112,6 @@ func (r *UserRepository) UpdateProfile(ctx context.Context, input *domain.User) 
 	return &user, nil
 }
 
-func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
-	query := `
-		SELECT *
-		FROM users_schema.users
-		WHERE email = $1 OR first_name = $1 OR last_name = $1
-		LIMIT 1
-	`
-
-	rows, err := r.db.Query(ctx, query, username)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	user, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.User])
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
-}
-
 func (r *UserRepository) UpdateAvatar(ctx context.Context, userID uuid.UUID, avatarURL string) (*domain.User, string, error) {
 	query := `
         WITH old_user AS (
