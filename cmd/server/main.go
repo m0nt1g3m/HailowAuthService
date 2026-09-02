@@ -27,7 +27,7 @@ func main() {
 
 	addr := os.Getenv("AUTH_SERVICE_HOST")
 	if addr == "" {
-		addr = "localhost"
+		addr = "0.0.0.0"
 	}
 
 	portStr := os.Getenv("AUTH_SERVICE_PORT")
