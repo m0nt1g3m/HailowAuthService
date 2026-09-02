@@ -25,7 +25,7 @@ func main() {
 		debug = true
 	}
 
-	addr := os.Getenv("AUTH_SERVICE_ADDR")
+	addr := os.Getenv("AUTH_SERVICE_HOST")
 	if addr == "" {
 		addr = "localhost"
 	}

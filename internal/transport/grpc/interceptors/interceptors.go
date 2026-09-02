@@ -49,7 +49,7 @@ func LoggingInterceptor() grpc.UnaryServerInterceptor {
 
 func AuthInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		if strings.HasSuffix(info.FullMethod, "SignIn") || strings.HasSuffix(info.FullMethod, "SignUp") {
+		if strings.HasSuffix(info.FullMethod, "SignIn") || strings.HasSuffix(info.FullMethod, "SignUp") || strings.HasSuffix(info.FullMethod, "ValidateToken") {
 			return handler(ctx, req)
 		}
 

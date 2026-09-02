@@ -3,6 +3,7 @@ package auth
 import (
 	"HailowAuthService/internal/domain"
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -12,16 +13,20 @@ import (
 
 func (u *AuthUseCase) generateTokenPair(ctx context.Context, user *domain.User) (*domain.TokenPair, error) {
 	now := time.Now()
+	parsedUserID, err := uuid.Parse(user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id format: %w", err)
+	}
 
 	accessClaims := jwtClaims{
-		ID:        uuid.MustParse(user.ID),
+		ID:        parsedUserID,
 		Email:     user.Email,
 		Role:      string(user.Role),
 		FirstName: user.FirstName,
 		LastName:  user.LastName,
 		TokenType: "access",
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(u.accessTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
@@ -32,14 +37,14 @@ func (u *AuthUseCase) generateTokenPair(ctx context.Context, user *domain.User) 
 	}
 
 	refreshClaims := jwtClaims{
-		ID:        uuid.MustParse(user.ID),
+		ID:        parsedUserID,
 		Email:     user.Email,
 		Role:      string(user.Role),
 		FirstName: user.FirstName,
 		LastName:  user.LastName,
 		TokenType: "refresh",
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(u.refreshTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
@@ -50,10 +55,10 @@ func (u *AuthUseCase) generateTokenPair(ctx context.Context, user *domain.User) 
 	}
 
 	session := &domain.RefreshSession{
-		UserID:       uuid.MustParse(user.ID),
+		UserID:       parsedUserID,
 		RefreshToken: refreshTokenStr,
 		CreatedAt:    now,
-		ExpiresAt:    now.Add(24 * time.Hour),
+		ExpiresAt:    now.Add(u.refreshTTL),
 	}
 
 	if err := u.repo.CreateSession(ctx, session); err != nil {
@@ -68,14 +73,20 @@ func (u *AuthUseCase) generateTokenPair(ctx context.Context, user *domain.User) 
 
 func (u *AuthUseCase) generateAccessTokenOnly(user *domain.User, refreshToken string) (*domain.TokenPair, error) {
 	now := time.Now()
+	parsedUserID, err := uuid.Parse(user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user id format: %w", err)
+	}
+
 	claims := jwtClaims{
-		ID:        uuid.MustParse(user.ID),
+		ID:        parsedUserID,
 		Email:     user.Email,
 		Role:      string(user.Role),
 		FirstName: user.FirstName,
 		LastName:  user.LastName,
+		TokenType: "access",
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(u.accessTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
 	}
@@ -125,6 +136,10 @@ func (u *AuthUseCase) parseAccessToken(tokenStr string) (*jwtClaims, error) {
 	})
 
 	if err != nil || !token.Valid {
+		return nil, domain.ErrUnauthorized
+	}
+
+	if claims.TokenType != "" && claims.TokenType != "access" {
 		return nil, domain.ErrUnauthorized
 	}
 

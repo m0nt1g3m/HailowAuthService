@@ -24,9 +24,9 @@ func NewAuthHandler(usecase auth.Usecase) *AuthHandler {
 	return &AuthHandler{usecase: usecase}
 }
 
-func checkPermissions(ctx context.Context, tokenUserID string) error {
+func checkPermissions(ctx context.Context, userID string) error {
 	mdUserID, ok := ctx.Value(interceptors.ContextUserIDKey).(string)
-	logger.Log.Debugf("user-id from metadata: %s, user-id from refresh_token=%s", mdUserID, tokenUserID)
+	logger.Log.Debugf("user-id from metadata: %s, user-id from request=%s", mdUserID, userID)
 
 	if !ok || mdUserID == "" {
 		return errorcode.ToStatus(domain.ErrUserIDNotFoundMD)
@@ -41,7 +41,7 @@ func checkPermissions(ctx context.Context, tokenUserID string) error {
 	}
 
 	// A customer can only edit their own profile
-	if mdUserID != tokenUserID {
+	if mdUserID != userID {
 		return errorcode.ToStatus(domain.ErrPermissionDenied)
 	}
 
