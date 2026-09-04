@@ -13,8 +13,7 @@ jobs:
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message_thread_id: ${{ secrets.TELEGRAM_THREAD_ID }}
           message: |
-            🚀 **New push to repository!**
+            🚀 New push to repository!
             🧑‍💻 Author: ${{ github.actor }}
             🌿 Branch: ${{ github.ref_name }}
             📝 Commit: ${{ github.event.commits[0].message }}
-            🔗 Link: ${{ github.event.compare }}
