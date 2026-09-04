@@ -113,14 +113,14 @@ func (u *AuthUseCase) generateRefreshTokenWithClaims(claims jwtClaims) (string, 
 }
 
 func (u *AuthUseCase) getAccessSigningKey() []byte {
-	if key := os.Getenv("JWT_ACCESS_KEY_AUTH_SERVICE"); key != "" {
+	if key := os.Getenv("JWT_ACCESS_KEY_CUSTOMER"); key != "" {
 		return []byte(key)
 	}
 	return []byte("secret")
 }
 
 func (u *AuthUseCase) getRefreshSigningKey() []byte {
-	if key := os.Getenv("JWT_REFRESH_KEY_AUTH_SERVICE"); key != "" {
+	if key := os.Getenv("JWT_REFRESH_KEY_CUSTOMER"); key != "" {
 		return []byte(key)
 	}
 	return []byte("secret")
